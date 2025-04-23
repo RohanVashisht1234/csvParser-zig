@@ -26,18 +26,21 @@ const csv = struct {
 
 fn parseCSV(allocator: std.mem.Allocator, raw_data: []const u8) !csv {
     var headerList = std.ArrayList([]const u8).init(allocator);
+    errdefer headerList.deinit();
     var iter_for_lines = std.mem.splitScalar(u8, raw_data, '\n');
-    const number_of_columns = 1;
-    const number_of_rows = 0;
+    var number_of_columns: u16 = 0;
+    var number_of_rows: u32 = 1;
     if (iter_for_lines.next()) |header_line| {
         var iter_for_header = std.mem.splitScalar(u8, header_line, ',');
         while (iter_for_header.next()) |column_name| {
             try headerList.append(column_name);
+            number_of_columns += 1;
         }
     } else {
         return CSVParsingErrors.HeaderNotFoundEmptyCSV;
     }
     var rows = std.ArrayList([][]const u8).init(allocator);
+    errdefer rows.deinit();
     while (iter_for_lines.next()) |line| {
         var row = std.ArrayList([]const u8).init(allocator);
         var iter_for_header = std.mem.splitScalar(u8, line, ',');
@@ -45,7 +48,7 @@ fn parseCSV(allocator: std.mem.Allocator, raw_data: []const u8) !csv {
             try row.append(data_for_inidivisual_column);
         }
         const result = try row.toOwnedSlice();
-        // number_of_rows += 1;
+        number_of_rows += 1;
         try rows.append(result);
     }
     const rows_result = try rows.toOwnedSlice();
@@ -60,8 +63,21 @@ fn parseCSV(allocator: std.mem.Allocator, raw_data: []const u8) !csv {
 }
 
 pub fn main() !void {
-    const result = try parseCSV(std.heap.c_allocator, csvData);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer {
+        const deinit_status = gpa.deinit();
+        //fail test; can't try in defer as defer is executed after we return
+        if (deinit_status == .leak) @panic("TEST FAIL");
+    }
+    const result = try parseCSV(allocator, csvData);
     for (result.rows) |header| {
         std.debug.print("{s}\n", .{header});
     }
+    defer allocator.free(result.header);
+    defer allocator.free(result.rows);
+    defer for (result.rows) |row| {
+        allocator.free(row);
+    };
+    std.debug.print("{}", .{result.number_of_columns});
 }
